@@ -339,6 +339,7 @@ Educational use. Modify and distribute freely.
 ## Author
 
 Created as a Computer Networking course project.
+By - Hrushi Bhanvadiya and Harsh Halani
 
 ---
 
