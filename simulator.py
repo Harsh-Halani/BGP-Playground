@@ -106,6 +106,7 @@ class ASNode:
         self.rib: Dict[str, Route] = {}  # Routing Information Base
         self.rib_in: Dict[str, Dict[str, Route]] = {}  # Per-neighbor RIB-In
         self.policy = policy or Policy()
+        print(f"Initialized AS{asn} node")
     
     def add_neighbor(self, neighbor_asn: str):
         """Add BGP neighbor"""
@@ -118,9 +119,20 @@ class ASNode:
             prefix=prefix,
             as_path=[self.asn],
             origin=OriginType.IGP,
-            local_pref=100
+            local_pref=100,
+            next_hop=self.asn  # Set next_hop to self when originating
         )
+        print(f"AS{self.asn} originating route for {prefix}")
+        
+        # Store in RIB-In from self (treating as if received from self)
+        if self.asn not in self.rib_in:
+            self.rib_in[self.asn] = {}
+        self.rib_in[self.asn][prefix] = route
+        
+        # Store in RIB and trigger decision process
         self.rib[prefix] = route
+        self._run_decision_process(prefix)
+        print(f"AS{self.asn} RIB after origination: {self.rib}")
         return route
     
     def receive_route(self, route: Route, from_asn: str) -> bool:
@@ -128,18 +140,41 @@ class ASNode:
         Receive and process a BGP route.
         Returns True if route was accepted and caused a change.
         """
+        print(f"AS{self.asn} receiving route from AS{from_asn} for prefix {route.prefix}")
+        
         # Loop prevention
         if route.has_loop(self.asn):
+            print(f"AS{self.asn} detected loop in path {route.as_path}")
             return False
         
+        # Validate next_hop attribute
+        if not route.next_hop:
+            print(f"AS{self.asn} received route with no next_hop")
+            return False
+            
         # Apply import policy
         imported_route = self.policy.apply_import(route, from_asn)
+        if not imported_route:
+            print(f"AS{self.asn} route filtered by import policy")
+            return False
         
-        # Store in RIB-In
+        # Create a new copy for modification
+        imported_route = imported_route.clone()
+        
+        # Store in RIB-In with validated next_hop
+        if from_asn not in self.rib_in:
+            self.rib_in[from_asn] = {}
+        
+        imported_route.next_hop = from_asn  # Set next_hop to direct neighbor
         self.rib_in[from_asn][route.prefix] = imported_route
         
+        print(f"AS{self.asn} stored route in RIB-IN from AS{from_asn}")
+        
         # Run decision process
-        return self._run_decision_process(route.prefix)
+        changed = self._run_decision_process(route.prefix)
+        print(f"AS{self.asn} decision process result: changed={changed}")
+        print(f"AS{self.asn} current RIB: {self.rib}")
+        return changed
     
     def withdraw_route(self, prefix: str, from_asn: str) -> bool:
         """
@@ -156,28 +191,38 @@ class ASNode:
         Run BGP decision process for a prefix.
         Returns True if the best route changed.
         """
+        print(f"AS{self.asn} running decision process for prefix {prefix}")
+        
         # Collect all candidate routes
         candidates: List[Tuple[Route, str]] = []
         for neighbor, routes in self.rib_in.items():
             if prefix in routes:
-                candidates.append((routes[prefix], neighbor))
+                route = routes[prefix]
+                candidates.append((route, neighbor))
+                print(f"Candidate from AS{neighbor}: {route.as_path}")
         
         if not candidates:
+            print(f"AS{self.asn} no candidates available for {prefix}")
             # No routes available, remove from RIB
             if prefix in self.rib:
                 del self.rib[prefix]
+                print(f"AS{self.asn} removed route for {prefix} from RIB")
                 return True
             return False
         
         # Select best route using BGP decision process
         best_route = self._select_best_route(candidates)
+        print(f"AS{self.asn} selected best route: {best_route.as_path}")
         
         # Check if best route changed
         old_best = self.rib.get(prefix)
         if old_best and self._routes_equal(old_best, best_route):
+            print(f"AS{self.asn} best route unchanged")
             return False
         
-        self.rib[prefix] = best_route
+        # Store new best route
+        self.rib[prefix] = best_route.clone()  # Store a copy
+        print(f"AS{self.asn} updated RIB with new best route for {prefix}")
         return True
     
     def _select_best_route(self, candidates: List[Tuple[Route, str]]) -> Route:
@@ -186,24 +231,41 @@ class ASNode:
         1. Highest LOCAL_PREF
         2. Shortest AS_PATH
         3. Lowest origin type (IGP < EGP < INCOMPLETE)
-        4. Lowest MED
-        5. Tie-breaker: first in list
+        4. Lowest MED for routes from same AS
+        5. eBGP over iBGP (not implemented in this simulator)
+        6. Lowest IGP metric to next hop (not implemented)
+        7. Tie-breaker: lowest neighbor ASN
         """
         if len(candidates) == 1:
             return candidates[0][0]
         
-        # Sort by decision process criteria
+        # Group routes by next hop AS to compare MEDs correctly
+        routes_by_first_as = {}
+        for route, neighbor in candidates:
+            first_as = route.as_path[0] if route.as_path else neighbor
+            if first_as not in routes_by_first_as:
+                routes_by_first_as[first_as] = []
+            routes_by_first_as[first_as].append((route, neighbor))
+        
+        # For each next hop AS, select best route considering MED
+        best_per_as = []
+        for routes in routes_by_first_as.values():
+            # Sort by MED within same AS routes
+            routes.sort(key=lambda x: (x[0].med, x[1]))  # Sort by MED, then neighbor ASN
+            best_per_as.append(routes[0])
+        
+        # Final comparison across different next hop ASes
         def compare_key(item):
-            route, _ = item
+            route, neighbor = item
             return (
                 -route.local_pref,  # Higher is better (negate for sort)
                 len(route.as_path),  # Shorter is better
                 route.origin.value,  # Lower is better
-                route.med  # Lower is better
+                neighbor  # Lower neighbor ASN wins ties
             )
         
-        candidates.sort(key=compare_key)
-        return candidates[0][0]
+        best_per_as.sort(key=compare_key)
+        return best_per_as[0][0]
     
     def _routes_equal(self, r1: Route, r2: Route) -> bool:
         """Check if two routes are equal"""
@@ -217,15 +279,28 @@ class ASNode:
     
     def prepare_advertisement(self, route: Route, to_asn: str) -> Optional[Route]:
         """Prepare route for advertisement to neighbor"""
+        print(f"AS{self.asn} preparing advertisement to AS{to_asn} for prefix {route.prefix}")
+        
+        # Don't advertise routes learned from this neighbor (split horizon)
+        if route.next_hop == to_asn:
+            print(f"Skipping route learned from AS{to_asn}")
+            return None
+            
         # Apply export policy
         exported = self.policy.apply_export(route, to_asn)
         if not exported:
+            print(f"Route filtered by export policy")
             return None
         
-        # Prepend own ASN to path
-        exported.as_path.insert(0, self.asn)
+        # Create a new copy for modification
+        exported = exported.clone()
+        
+        # Prepend own ASN to path if not already there
+        if not exported.as_path or exported.as_path[0] != self.asn:
+            exported.as_path.insert(0, self.asn)
         exported.next_hop = self.asn
         
+        print(f"Prepared route: prefix={exported.prefix}, as_path={exported.as_path}, next_hop={exported.next_hop}")
         return exported
 
 
@@ -294,14 +369,32 @@ class BGPSimulator:
         origin_asn = self.config["origin_as"]
         prefixes = self.config["prefixes"]
         
+        print(f"\nStarting baseline scenario with origin AS{origin_asn}")
+        print(f"Prefixes to announce: {prefixes}")
+        
         # Origin announces prefixes
         for prefix in prefixes:
+            print(f"\nOrigin AS{origin_asn} announcing prefix {prefix}")
             route = self.nodes[origin_asn].originate_route(prefix)
             self.log_event("update", from_as=origin_asn, prefix=prefix,
                          details="Origin announcement")
+            
+            # Verify route is in origin's RIB
+            if prefix in self.nodes[origin_asn].rib:
+                print(f"Successfully added route to AS{origin_asn}'s RIB")
+            else:
+                print(f"WARNING: Route not added to AS{origin_asn}'s RIB")
         
         # Propagate until convergence
+        print("\nStarting route propagation")
         self._propagate_until_convergence()
+        
+        # Verify final routing tables
+        print("\nFinal Routing Tables:")
+        for asn, node in self.nodes.items():
+            print(f"\nAS{asn} RIB:")
+            for prefix, route in node.rib.items():
+                print(f"  {prefix}: AS_PATH={route.as_path}, next_hop={route.next_hop}")
     
     def _run_hijack(self):
         """Run BGP hijack scenario"""
@@ -366,6 +459,9 @@ class BGPSimulator:
             self.current_step += 1
             iteration += 1
             
+            # Keep track of updates to process in this iteration
+            updates_to_process = []
+            
             # Each node advertises its best routes to neighbors
             for asn, node in self.nodes.items():
                 routes_to_advertise = node.get_routes_to_advertise()
@@ -374,22 +470,36 @@ class BGPSimulator:
                     neighbor = self.nodes[neighbor_asn]
                     
                     for prefix, route in routes_to_advertise.items():
+                        # Skip if route is already in neighbor's RIB-In with same attributes
+                        if (neighbor_asn in node.rib_in and 
+                            prefix in node.rib_in[neighbor_asn] and 
+                            self._routes_equal(route, node.rib_in[neighbor_asn][prefix])):
+                            continue
+                        
                         # Prepare advertisement
                         adv_route = node.prepare_advertisement(route, neighbor_asn)
                         
                         if adv_route:
-                            # Send to neighbor
-                            changed = neighbor.receive_route(adv_route, asn)
-                            
-                            if changed:
-                                self.best_route_changes_total += 1
-                                converged = False
-                                self.log_event("update", from_as=asn, to_as=neighbor_asn,
-                                             prefix=prefix, 
-                                             details=f"Route update")
+                            # Queue update for processing
+                            updates_to_process.append((asn, neighbor_asn, prefix, adv_route))
             
-            # Send keepalives
-            if converged:
+            # Process all queued updates
+            for update in updates_to_process:
+                from_asn, to_asn, prefix, adv_route = update
+                neighbor = self.nodes[to_asn]
+                
+                # Send to neighbor
+                changed = neighbor.receive_route(adv_route, from_asn)
+                
+                if changed:
+                    self.best_route_changes_total += 1
+                    converged = False
+                    self.log_event("update", from_as=from_asn, to_as=to_asn,
+                                 prefix=prefix, 
+                                 details=f"Route update")
+            
+            # Send keepalives only if no updates were processed
+            if not updates_to_process:
                 for asn, node in self.nodes.items():
                     for neighbor in node.neighbors:
                         self.log_event("keepalive", from_as=asn, to_as=neighbor)
@@ -423,6 +533,13 @@ class BGPSimulator:
             "topology": topology
         }
     
+    def _routes_equal(self, r1: Route, r2: Route) -> bool:
+        """Check if two routes are equal"""
+        return (r1.as_path == r2.as_path and 
+                r1.local_pref == r2.local_pref and
+                r1.origin == r2.origin and
+                r1.next_hop == r2.next_hop)
+
     def _calculate_metrics(self, final_ribs: dict) -> dict:
         """Calculate simulation metrics"""
         # Count event types
