@@ -1,85 +1,16 @@
 """
-BGP Playground - Flask Application
-Main web server with REST API and UI endpoints
+Example Configurations
+Predefined simulation scenarios
 """
 
-from flask import Flask, render_template, request, jsonify
-from simulator import run_simulation
-import json
 
-app = Flask(__name__)
-
-
-@app.route('/')
-def index():
-    """Render main UI"""
-    return render_template('index.html')
-
-
-@app.route('/api/status', methods=['GET'])
-def status():
-    """Health check endpoint"""
-    return jsonify({
-        "status": "ok",
-        "service": "BGP Playground",
-        "version": "1.0.0"
-    })
-
-
-@app.route('/api/simulate', methods=['POST'])
-def simulate():
+def get_examples():
     """
-    Run BGP simulation
+    Get all example topology configurations
     
-    Expected JSON body:
-    {
-        "nodes": ["100", "200", "300"],
-        "links": [["100", "200"], ["200", "300"]],
-        "prefixes": ["10.0.1.0/24"],
-        "origin_as": "100",
-        "scenario": "baseline|hijack|route_flap",
-        "hijacker": "300",  // for hijack scenario
-        "policies": {
-            "200": {
-                "local_pref": {"100": 100, "300": 50},
-                "export_filters": [["deny", "10.0.1.0/24"]],
-                "as_path_prepend": 1
-            }
-        }
-    }
+    Returns:
+        Dictionary of example configurations
     """
-    try:
-        config = request.get_json()
-        
-        # Validate required fields
-        if not config.get("nodes"):
-            return jsonify({"error": "Missing 'nodes' field"}), 400
-        
-        if not config.get("links"):
-            return jsonify({"error": "Missing 'links' field"}), 400
-        
-        # Set defaults
-        if "prefixes" not in config:
-            config["prefixes"] = ["10.0.1.0/24"]
-        
-        if "origin_as" not in config:
-            config["origin_as"] = config["nodes"][0]
-        
-        if "scenario" not in config:
-            config["scenario"] = "baseline"
-        
-        # Run simulation
-        results = run_simulation(config)
-        
-        return jsonify(results)
-    
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/examples', methods=['GET'])
-def examples():
-    """Get example topologies"""
     examples = {
         "simple_line": {
             "name": "Simple Line Topology",
@@ -223,8 +154,4 @@ def examples():
         }
     }
     
-    return jsonify(examples)
-
-
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    return examples

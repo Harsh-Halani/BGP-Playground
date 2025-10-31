@@ -43,7 +43,7 @@ A beautiful, interactive Flask web application for simulating BGP (Border Gatewa
 ### Running the Application
 
 ```bash
-python app.py
+python run.py
 ```
 
 Open your browser and navigate to: **http://localhost:5000**
@@ -52,16 +52,35 @@ Open your browser and navigate to: **http://localhost:5000**
 
 ```
 bgp-playground/
-├── app.py                 # Flask application & API endpoints
-├── simulator.py           # BGP simulation engine
+├── run.py                 # Application entry point
 ├── requirements.txt       # Python dependencies
+├── .gitignore            # Git ignore rules
+├── app/
+│   ├── __init__.py       # Application factory
+│   ├── config.py         # Configuration settings
+│   ├── models/           # Data models
+│   │   ├── __init__.py
+│   │   ├── as_node.py    # AS Node model
+│   │   ├── policy.py     # Policy model
+│   │   └── route.py      # Route model
+│   ├── routes/           # API routes
+│   │   ├── __init__.py
+│   │   ├── api.py        # REST API endpoints
+│   │   ├── examples.py   # Example scenarios
+│   │   └── main.py       # Main routes
+│   └── utils/            # Utilities
+│       ├── __init__.py
+│       ├── simulator.py  # BGP simulation engine
+│       └── validators.py # Input validation
 ├── templates/
 │   ├── base.html         # Base template with layout
 │   └── index.html        # Main UI template
 ├── static/
 │   ├── main.js           # Frontend logic & interactions
 │   └── style.css         # Custom styles
-└── README.md             # This file
+├── tests/                # Unit tests
+│   └── test_simulator.py
+└── README.md            # This file
 ```
 
 ## Features
@@ -303,9 +322,9 @@ This project demonstrates:
 
 ### Port Already in Use
 
-Change the port in `app.py`:
+Change the port in `app/config.py`:
 ```python
-app.run(debug=True, host='0.0.0.0', port=5001)
+PORT = 5001  # Change to desired port
 ```
 
 ### JSON Parse Error

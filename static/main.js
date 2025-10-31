@@ -29,9 +29,136 @@ async function initApp() {
     setupEventListeners();
     setupThemeToggle();
     setupSpeedControl();
+    setupConfigEditor();
     
     // Initialize default example
     loadExample('simple_line');
+}
+
+/**
+ * Setup JSON config editor: allow brackets, tabs, and auto-pairing
+ */
+function setupConfigEditor() {
+    const ta = document.getElementById('configInput');
+    if (!ta) return;
+
+    // Editor-friendly attributes
+    ta.setAttribute('spellcheck', 'false');
+    ta.setAttribute('autocomplete', 'off');
+    ta.setAttribute('autocorrect', 'off');
+    ta.setAttribute('autocapitalize', 'off');
+    ta.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+    ta.style.fontSize = '13px';
+    ta.style.lineHeight = '1.5';
+
+    // Helper to insert text at cursor
+    function insertAtCursor(el, text) {
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        const value = el.value;
+        el.value = value.slice(0, start) + text + value.slice(end);
+        const newPos = start + text.length;
+        el.selectionStart = el.selectionEnd = newPos;
+    }
+
+    // Helper to wrap selection with pair
+    function wrapSelection(el, left, right) {
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        const value = el.value;
+        const selected = value.slice(start, end);
+        el.value = value.slice(0, start) + left + selected + right + value.slice(end);
+        const newPosStart = start + left.length;
+        const newPosEnd = newPosStart + selected.length;
+        el.selectionStart = newPosStart;
+        el.selectionEnd = newPosEnd;
+    }
+
+    // Keydown enhancements
+    ta.addEventListener('keydown', (e) => {
+        // Allow braces/brackets explicitly
+        if (e.key === '{' || e.key === '}' || e.key === '[' || e.key === ']') {
+            // Do not prevent default – just let it type normally
+            return;
+        }
+
+        // Tab -> insert 2 spaces
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            insertAtCursor(ta, '  ');
+            return;
+        }
+
+        // Enter inside braces/brackets: add newline and indent
+        if (e.key === 'Enter') {
+            const before = ta.value.slice(0, ta.selectionStart);
+            const after = ta.value.slice(ta.selectionEnd);
+            const prevChar = before.slice(-1);
+            const nextChar = after.slice(0, 1);
+            if ((prevChar === '{' && nextChar === '}') || (prevChar === '[' && nextChar === ']')) {
+                e.preventDefault();
+                const indent = '  ';
+                const insert = `\n${indent}\n`;
+                const start = ta.selectionStart;
+                ta.value = before + insert + after;
+                ta.selectionStart = ta.selectionEnd = start + 1 + indent.length;
+                return;
+            }
+        }
+
+        // Auto-pair quotes/brackets
+        const pairs = { '"': '"', "'": "'", '{': '}', '[': ']' };
+        if (pairs[e.key]) {
+            // Only autopair when no selection and next char isn't already the closer
+            if (ta.selectionStart === ta.selectionEnd) {
+                const nextChar = ta.value.slice(ta.selectionStart, ta.selectionStart + 1);
+                if (nextChar !== pairs[e.key]) {
+                    e.preventDefault();
+                    const left = e.key;
+                    const right = pairs[e.key];
+                    insertAtCursor(ta, left + right);
+                    // Move cursor between the pair
+                    ta.selectionStart = ta.selectionEnd = ta.selectionStart - 1;
+                    return;
+                }
+            } else {
+                // Wrap selection
+                e.preventDefault();
+                wrapSelection(ta, e.key, pairs[e.key]);
+                return;
+            }
+        }
+    });
+
+    // Toolbar buttons if present
+    const bracketButtons = document.querySelectorAll('[data-insert-to="configInput"]');
+    bracketButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const text = btn.getAttribute('data-text') || '';
+            const pair = btn.getAttribute('data-pair') || '';
+            ta.focus();
+            if (pair) {
+                wrapSelection(ta, text, pair);
+            } else {
+                insertAtCursor(ta, text);
+            }
+        });
+    });
+
+    // Validate JSON button
+    const validateBtn = document.getElementById('validateJsonBtn');
+    if (validateBtn) {
+        validateBtn.addEventListener('click', () => {
+            try {
+                const obj = JSON.parse(ta.value);
+                // Pretty print
+                ta.value = JSON.stringify(obj, null, 2);
+                showStatus('JSON is valid.', 'success');
+            } catch (err) {
+                showStatus('Invalid JSON: ' + err.message, 'error');
+            }
+        });
+    }
 }
 
 /**
@@ -111,19 +238,29 @@ function setupEventListeners() {
  */
 function setupThemeToggle() {
     const btn = document.getElementById('themeToggle');
-    if (!btn) return;
+    if (!btn) {
+        console.error('Theme toggle button not found!');
+        return;
+    }
+    
+    console.log('Setting up theme toggle...');
     
     // Set initial button text based on current theme
     const updateButtonText = () => {
         const isDark = document.documentElement.classList.contains('dark');
-        btn.textContent = isDark ? '☀ Light' : '🌙 Dark';
+        btn.textContent = isDark ? '☀️ Light' : '🌙 Dark';
+        console.log('Theme updated:', isDark ? 'dark' : 'light');
     };
     
     // Initialize button text
     updateButtonText();
     
     // Add click handler
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+        console.log('Theme toggle clicked!');
+        e.preventDefault();
+        e.stopPropagation();
+        
         // Toggle dark class on root element
         document.documentElement.classList.toggle('dark');
         const isDark = document.documentElement.classList.contains('dark');
@@ -131,6 +268,7 @@ function setupThemeToggle() {
         // Save preference to localStorage
         try {
             localStorage.setItem('bgp_theme', isDark ? 'dark' : 'light');
+            console.log('Theme saved to localStorage:', isDark ? 'dark' : 'light');
         } catch (e) {
             console.warn('Could not save theme preference:', e);
         }
@@ -148,6 +286,8 @@ function setupThemeToggle() {
             }
         }
     });
+    
+    console.log('Theme toggle setup complete');
 }
 
 /**
@@ -211,9 +351,11 @@ async function runSimulation() {
 
 /**
  * Prepare step-by-step data for dynamic visualization
+ * COMPLETELY REWRITTEN to fix all issues
  */
 function prepareStepByStepData(results) {
-    console.log('Preparing step-by-step data...', results);
+    console.log('=== PREPARING STEP-BY-STEP DATA ===');
+    console.log('Timeline events:', results.timeline.length);
     
     stepData = [];
     
@@ -232,61 +374,104 @@ function prepareStepByStepData(results) {
     
     // Find max step
     const maxStep = Math.max(...timeline.map(e => e.timestamp), 0);
-    console.log(`Max step: ${maxStep}`);
+    console.log(`Processing ${maxStep + 1} steps (0 to ${maxStep})`);
     
     // Initialize RIB evolution tracker - maintains state across all steps
+    // Each AS starts with an empty RIB
     const ribEvolution = {};
     topology.nodes.forEach(node => {
         ribEvolution[node.id] = {};
     });
     
-    // Process each step chronologically
+    // Process each step chronologically from 0 to maxStep
     for (let step = 0; step <= maxStep; step++) {
+        // Get only events for THIS specific step
         const stepEvents = timeline.filter(e => e.timestamp === step);
         
-        // Update RIB state based on events at this step
-        stepEvents.forEach(event => {
-            // Initialize AS if not exists
+        console.log(`\n--- Step ${step}: ${stepEvents.length} events ---`);
+        
+        // Process each event in this step
+        stepEvents.forEach((event, idx) => {
+            console.log(`  Event ${idx + 1}:`, event.event_type, event.from_as, '→', event.to_as, event.prefix);
+            
+            // Ensure ASes exist in RIB tracker
+            if (event.from_as && !ribEvolution[event.from_as]) {
+                ribEvolution[event.from_as] = {};
+            }
             if (event.to_as && !ribEvolution[event.to_as]) {
                 ribEvolution[event.to_as] = {};
             }
             
-            if (event.event_type === 'update' && event.prefix && event.from_as && event.to_as) {
-                // Extract AS path from event details or construct it
-                let asPath = [event.from_as];
-                
-                // If this is a propagated route, the as_path might be in event details
-                // For now, we'll use a simple path
-                if (event.details && event.details.includes('Path:')) {
-                    // Try to extract path from details
-                    const pathMatch = event.details.match(/Path: ([^\)]+)/);
-                    if (pathMatch) {
-                        asPath = pathMatch[1].split(' → ').map(s => s.trim());
-                    }
+            if (event.event_type === 'update' && event.prefix) {
+                // Case 1: Origin announcement (from_as originates the route, no to_as)
+                // This should NOT happen in timeline - origin routes are pre-installed
+                // But if it does, handle it
+                if (event.from_as && !event.to_as) {
+                    console.log(`    → Origin announcement: ${event.from_as} originates ${event.prefix}`);
+                    ribEvolution[event.from_as][event.prefix] = {
+                        prefix: event.prefix,
+                        as_path: [event.from_as],
+                        local_pref: 100,
+                        origin: 'IGP',
+                        med: 0,
+                        next_hop: event.from_as
+                    };
                 }
                 
-                // Create route entry
-                const route = {
-                    as_path: asPath,
-                    local_pref: 100,
-                    origin: 'IGP',
-                    med: 0,
-                    next_hop: event.from_as
-                };
-                
-                // Apply policies if they exist in config
-                if (results.config && results.config.policies) {
-                    const nodePolicy = results.config.policies[event.to_as];
-                    if (nodePolicy && nodePolicy.local_pref && nodePolicy.local_pref[event.from_as]) {
-                        route.local_pref = nodePolicy.local_pref[event.from_as];
+                // Case 2: Normal BGP update (from_as sends route to to_as)
+                else if (event.from_as && event.to_as) {
+                    // Get the route that from_as has for this prefix
+                    const sourceRoute = ribEvolution[event.from_as][event.prefix];
+                    
+                    if (!sourceRoute) {
+                        console.warn(`    ⚠ ${event.from_as} doesn't have route for ${event.prefix}!`);
+                        // Create a basic route anyway (shouldn't happen in correct simulation)
+                        ribEvolution[event.to_as][event.prefix] = {
+                            prefix: event.prefix,
+                            as_path: [event.to_as, event.from_as],
+                            local_pref: 100,
+                            origin: 'IGP',
+                            med: 0,
+                            next_hop: event.from_as
+                        };
+                    } else {
+                        // Construct the AS_PATH for the received route.
+                        // Rule:
+                        //  - If the sender's stored path already begins with sender ASN (typical for origin), don't double-prepend.
+                        //  - If it was learned from elsewhere (path starts with a different ASN), prepend sender ASN.
+                        const srcPath = Array.isArray(sourceRoute.as_path) ? sourceRoute.as_path : [];
+                        const newAsPath = (srcPath[0] === event.from_as) ? srcPath.slice() : [event.from_as, ...srcPath];
+                        
+                        console.log(`    → Path: ${newAsPath.join(' → ')}`);
+                        
+                        // Create the new route for to_as
+                        const newRoute = {
+                            prefix: event.prefix,
+                            as_path: newAsPath,
+                            local_pref: 100,  // Default
+                            origin: sourceRoute.origin || 'IGP',
+                            med: sourceRoute.med || 0,
+                            next_hop: event.from_as  // Next hop is the peer that sent the route
+                        };
+                        
+                        // Apply local policies if they exist
+                        if (results.config && results.config.policies) {
+                            const nodePolicy = results.config.policies[event.to_as];
+                            if (nodePolicy && nodePolicy.local_pref && nodePolicy.local_pref[event.from_as]) {
+                                newRoute.local_pref = nodePolicy.local_pref[event.from_as];
+                                console.log(`    → Applied policy: local_pref = ${newRoute.local_pref}`);
+                            }
+                        }
+                        
+                        // Install the route in to_as's RIB
+                        ribEvolution[event.to_as][event.prefix] = newRoute;
                     }
                 }
-                
-                // Add/update route in RIB
-                ribEvolution[event.to_as][event.prefix] = route;
-                
-            } else if (event.event_type === 'withdraw' && event.prefix && event.to_as) {
-                // Remove route from RIB
+            }
+            
+            // Case 3: Withdrawal
+            else if (event.event_type === 'withdraw' && event.prefix && event.to_as) {
+                console.log(`    → Withdraw: ${event.to_as} removes ${event.prefix}`);
                 if (ribEvolution[event.to_as] && ribEvolution[event.to_as][event.prefix]) {
                     delete ribEvolution[event.to_as][event.prefix];
                 }
@@ -294,6 +479,7 @@ function prepareStepByStepData(results) {
         });
         
         // Create deep copy snapshot of current RIB state for this step
+        // This preserves the state at this moment in time
         const stepRibs = JSON.parse(JSON.stringify(ribEvolution));
         
         // Calculate metrics for this step
@@ -308,19 +494,20 @@ function prepareStepByStepData(results) {
             events: stepEvents.length
         };
         
-        // Store step data
+        // Store step data with correct step number
         stepData.push({
-            step: step,
+            step: step,  // IMPORTANT: Use actual step number
             events: stepEvents,
             ribs: stepRibs,
             metrics: metrics
         });
         
-        console.log(`Step ${step}: ${stepEvents.length} events, ${totalRoutes} total routes`);
+        console.log(`  Total routes after step ${step}: ${totalRoutes}`);
     }
     
-    console.log('Step-by-step data prepared:', stepData.length, 'steps');
+    console.log(`\n=== STEP DATA PREPARED: ${stepData.length} steps ===\n`);
 }
+
 /**
  * Calculate metrics for a specific step
  */
@@ -354,35 +541,51 @@ function displayInitialResults() {
     // Show metrics
     displayMetrics(currentResults.metrics);
     
-    // Display topology with empty RIBs initially
+    // Display topology with NO RIBs initially (empty state)
     displayTopology(currentResults.topology, {});
     
-    // Clear timeline and RIBs initially
-    document.getElementById('timelineContainer').innerHTML = '<p class="text-sm" style="color: var(--muted);">Click Play to start step-by-step visualization...</p>';
-    document.getElementById('ribsContainer').innerHTML = '<p class="text-sm" style="color: var(--muted);">Click Play to start step-by-step visualization...</p>';
+    // Clear timeline and RIBs - show placeholder messages
+    document.getElementById('timelineContainer').innerHTML = '<p class="text-sm" style="color: var(--muted); padding: 2rem; text-align: center;">Click Play to start step-by-step visualization...</p>';
+    document.getElementById('ribsContainer').innerHTML = '<p class="text-sm" style="color: var(--muted); padding: 2rem; text-align: center;">Click Play to start step-by-step visualization...</p>';
     
     // Show playback controls
     document.getElementById('playbackControls').classList.remove('hidden');
     
-    // Reset playback
+    // Reset playback to step 0 but DON'T display it yet
     currentStep = 0;
     updatePlaybackDisplay();
     
-    // Initialize first step
-    if (stepData.length > 0) {
-        updateStepVisualization();
-    } else {
-        console.warn('No step data available');
-    }
+    // DO NOT call updateStepVisualization() here!
+    // User must click Play to see step 0
+    console.log('Initial state ready. Click Play to begin.');
 }
 /**
  * Display metrics
  */
 function displayMetrics(metrics) {
-    document.getElementById('metricsCard').classList.remove('hidden');
+    console.log('displayMetrics called with:', metrics);
+    
+    const metricsCard = document.getElementById('metricsCard');
+    if (!metricsCard) {
+        console.error('metricsCard element not found!');
+        return;
+    }
+    
+    console.log('Removing hidden class from metricsCard');
+    metricsCard.classList.remove('hidden');
+    
+    // Force display with inline style as fallback
+    metricsCard.style.display = 'block';
+    
     document.getElementById('metricSteps').textContent = metrics.convergence_steps || 0;
     document.getElementById('metricUpdates').textContent = metrics.total_updates || 0;
     document.getElementById('metricEvents').textContent = metrics.total_events || 0;
+    
+    console.log('Metrics displayed:', {
+        steps: metrics.convergence_steps,
+        updates: metrics.total_updates,
+        events: metrics.total_events
+    });
     
     if (metrics.hijack_coverage_pct !== undefined) {
         document.getElementById('hijackMetric').classList.remove('hidden');
@@ -571,49 +774,51 @@ function closeRIBModal() {
 function displayTimelineForStep(step) {
     const container = document.getElementById('timelineContainer');
     container.innerHTML = '';
-    
-    // Check if step data exists
-    if (!stepData || !stepData[step]) {
-        container.innerHTML = '<p class="text-sm" style="color: var(--muted);">No events for this step</p>';
+
+    if (!stepData || stepData.length === 0) {
+        container.innerHTML = '<p class="text-sm" style="color: var(--muted);">No events</p>';
         return;
     }
-    
-    const events = stepData[step].events;
-    
-    // Check if there are events
-    if (!events || events.length === 0) {
-        container.innerHTML = '<p class="text-sm" style="color: var(--muted);">No events for this step</p>';
-        return;
-    }
-    
-    // Display each event
-    events.forEach((event, index) => {
-        const eventDiv = document.createElement('div');
-        eventDiv.className = 'timeline-event animate-fade-in';
-        
-        let badgeClass = 'event-badge event-badge-open';
-        if (event.event_type === 'update') badgeClass = 'event-badge event-badge-update';
-        if (event.event_type === 'withdraw') badgeClass = 'event-badge event-badge-withdraw';
-        if (event.event_type === 'keepalive') badgeClass = 'event-badge event-badge-keepalive';
-        
-        eventDiv.innerHTML = `
-            <div class="flex items-start space-x-3">
-                <span class="${badgeClass}">
-                    ${event.event_type.toUpperCase()}
-                </span>
-                <div class="flex-1">
-                    <div class="text-sm font-medium">
-                        Step ${event.timestamp}: AS${event.from_as}
-                        ${event.to_as ? `→ AS${event.to_as}` : ''}
+
+    // Show cumulative events from step 0 up to current step
+    for (let s = 0; s <= step && s < stepData.length; s++) {
+        const events = stepData[s].events || [];
+
+        if (!events.length) continue;
+
+        events.forEach(event => {
+            const eventDiv = document.createElement('div');
+            eventDiv.className = 'timeline-event animate-fade-in';
+
+            let badgeClass = 'event-badge event-badge-open';
+            if (event.event_type === 'update') badgeClass = 'event-badge event-badge-update';
+            if (event.event_type === 'withdraw') badgeClass = 'event-badge event-badge-withdraw';
+            if (event.event_type === 'keepalive') badgeClass = 'event-badge event-badge-keepalive';
+
+            eventDiv.innerHTML = `
+                <div class="flex items-start space-x-3">
+                    <span class="${badgeClass}">
+                        ${event.event_type.toUpperCase()}
+                    </span>
+                    <div class="flex-1">
+                        <div class="text-sm font-medium">
+                            Step ${s + 1}: AS${event.from_as}
+                            ${event.to_as ? `→ AS${event.to_as}` : ''}
+                        </div>
+                        ${event.prefix ? `<div class="text-xs mt-1" style="color: var(--muted);">Prefix: ${event.prefix}</div>` : ''}
+                        ${event.details ? `<div class="text-xs mt-1" style="color: var(--muted);">${event.details}</div>` : ''}
                     </div>
-                    ${event.prefix ? `<div class="text-xs mt-1" style="color: var(--muted);">Prefix: ${event.prefix}</div>` : ''}
-                    ${event.details ? `<div class="text-xs mt-1" style="color: var(--muted);">${event.details}</div>` : ''}
                 </div>
-            </div>
-        `;
-        
-        container.appendChild(eventDiv);
-    });
+            `;
+
+            container.appendChild(eventDiv);
+        });
+    }
+
+    // If still empty (no events at any step), show placeholder
+    if (!container.children.length) {
+        container.innerHTML = '<p class="text-sm" style="color: var(--muted);">No events</p>';
+    }
 }
 
 /**
@@ -656,16 +861,24 @@ function displayRIBsForStep(step) {
         } else {
             ribContent += '<div class="space-y-2">';
             for (const [prefix, route] of Object.entries(rib)) {
+                // Ensure route has all required fields
+                const asPath = route.as_path || [];
+                const localPref = route.local_pref !== undefined ? route.local_pref : 100;
+                const origin = route.origin || 'IGP';
+                const med = route.med !== undefined ? route.med : 0;
+                const nextHopRaw = route.next_hop || 'N/A';
+                const nextHop = (nextHopRaw === 'N/A') ? 'N/A' : `AS${nextHopRaw}`;
+                
                 ribContent += `
                     <div class="route-item">
                         <div class="route-prefix">${prefix}</div>
                         <div class="route-details">
-                            <div class="route-path">Path: ${route.as_path.join(' → ')}</div>
+                            <div class="route-path">Path: ${asPath.join(' → ')}</div>
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.5rem;">
-                                <div>Local Pref: <span class="font-semibold">${route.local_pref}</span></div>
-                                <div>Origin: <span class="font-semibold">${route.origin}</span></div>
-                                <div>MED: <span class="font-semibold">${route.med}</span></div>
-                                <div>Next Hop: <span class="font-semibold">${route.next_hop || 'N/A'}</span></div>
+                                <div>Local Pref: <span class="font-semibold">${localPref}</span></div>
+                                <div>Origin: <span class="font-semibold">${origin}</span></div>
+                                <div>MED: <span class="font-semibold">${med}</span></div>
+                                <div>Next Hop: <span class="font-semibold">${nextHop}</span></div>
                             </div>
                         </div>
                     </div>
@@ -934,18 +1147,30 @@ function pausePlayback() {
 }
 
 function resetPlayback() {
+    console.log('Resetting playback...');
     pausePlayback();
     currentStep = 0;
     updatePlaybackDisplay();
-    updateStepVisualization();
+    
+    // Clear displays - require user to click Play again
+    document.getElementById('timelineContainer').innerHTML = '<p class="text-sm" style="color: var(--muted); padding: 2rem; text-align: center;">Click Play to start step-by-step visualization...</p>';
+    document.getElementById('ribsContainer').innerHTML = '<p class="text-sm" style="color: var(--muted); padding: 2rem; text-align: center;">Click Play to start step-by-step visualization...</p>';
+    
+    // Reset network to empty state
+    if (currentResults && currentResults.topology) {
+        displayTopology(currentResults.topology, {});
+    }
+    
+    console.log('Reset to step 0. Click Play to begin.');
 }
 
 function updatePlaybackDisplay() {
-    const maxStep = stepData.length - 1;
-    document.getElementById('stepCounter').textContent = `Step: ${currentStep}/${maxStep}`;
+    const totalSteps = stepData.length;
+    const shownStep = Math.min(currentStep + 1, Math.max(totalSteps, 1));
+    document.getElementById('stepCounter').textContent = `Step: ${shownStep}/${totalSteps}`;
     
     // Show completion message
-    if (currentStep >= maxStep && isPlaying) {
+    if (currentStep >= totalSteps - 1 && isPlaying) {
         setTimeout(() => {
             showStatus('Playback complete!', 'success');
         }, 100);
