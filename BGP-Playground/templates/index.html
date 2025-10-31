@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Left Panel - Configuration -->
+    <div class="lg:col-span-1">
+        <div class="card">
+            <h2 class="text-lg font-semibold mb-4">Configuration</h2>
+            
+            <!-- Example Scenarios -->
+            <div class="form-group">
+                <label class="form-label">Load Example</label>
+                <select id="exampleSelect" class="form-input form-select">
+                    <option value="">-- Select Example --</option>
+                </select>
+            </div>
+            
+            <!-- Configuration JSON -->
+            <div class="form-group">
+                <label class="form-label">
+                    Configuration JSON
+                    <span class="text-xs text-gray-500 font-normal">(edit to customize)</span>
+                </label>
+                <textarea 
+                    id="configInput" 
+                    rows="16" 
+                    class="form-input form-textarea"
+                    placeholder='{"nodes": ["100", "200", "300"], ...}'
+                ></textarea>
+            </div>
+            
+            <!-- Actions -->
+            <div class="flex gap-3">
+                <button id="runBtn" class="btn btn-primary flex-1">
+                    Run Simulation
+                </button>
+                <button id="clearBtn" class="btn btn-secondary">
+                    Clear
+                </button>
+            </div>
+            
+            <!-- Status -->
+            <div id="status" class="status hidden">
+                <p id="statusText"></p>
+            </div>
+        </div>
+        
+        <!-- Metrics Card -->
+        <div id="metricsCard" class="card mt-6 hidden">
+            <h3 class="text-lg font-semibold mb-4">Simulation Metrics</h3>
+            <div class="metrics-grid">
+                <div class="metric-item">
+                    <span class="metric-label">Convergence Steps:</span>
+                    <span id="metricSteps" class="metric-value">-</span>
+                </div>
+                <div class="metric-item">
+                    <span class="metric-label">Total Updates:</span>
+                    <span id="metricUpdates" class="metric-value">-</span>
+                </div>
+                <div class="metric-item">
+                    <span class="metric-label">Total Events:</span>
+                    <span id="metricEvents" class="metric-value">-</span>
+                </div>
+                <div id="hijackMetric" class="metric-item hidden">
+                    <span class="metric-label">Hijack Coverage:</span>
+                    <span id="metricHijack" class="metric-value" style="color: var(--error);">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Right Panel - Visualization & Results -->
+    <div class="lg:col-span-2">
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tabs-nav">
+                <button id="topologyTab" class="tab-btn active">
+                    Topology
+                </button>
+                <button id="timelineTab" class="tab-btn">
+                    Timeline
+                </button>
+                <button id="ribsTab" class="tab-btn">
+                    RIBs
+                </button>
+                <button id="chartsTab" class="tab-btn">
+                    Charts
+                </button>
+            </div>
+        </div>
+        
+        <!-- Tab Content -->
+        <div class="card" style="border-radius: 0 0 var(--radius-lg) var(--radius-lg); border-top: none;">
+            <!-- Topology View -->
+            <div id="topologyView" class="tab-content">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 class="text-lg font-semibold">AS Topology</h3>
+                    <div id="playbackControls" class="playback-controls hidden">
+                        <button id="playBtn" class="btn btn-success">
+                            ▶ Play
+                        </button>
+                        <button id="pauseBtn" class="btn btn-warning hidden">
+                            ⏸ Pause
+                        </button>
+                        <button id="resetBtn" class="btn btn-secondary">
+                            ⏮ Reset
+                        </button>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <label for="speedControl" style="font-size: 0.75rem; color: var(--muted);">Speed:</label>
+                            <input type="range" id="speedControl" min="200" max="2000" value="800" step="100" 
+                                   style="width: 80px; height: 4px; background: var(--border); border-radius: 2px;">
+                            <span id="speedValue" style="font-size: 0.75rem; color: var(--muted);">0.8s</span>
+                        </div>
+                        <span id="stepCounter" class="step-counter">Step: 0</span>
+                    </div>
+                </div>
+                <div id="networkVis" class="network-container"></div>
+                <p class="mt-3 text-xs text-center" style="color: var(--muted);">Interactive network graph - drag nodes to rearrange, click to view routes</p>
+            </div>
+            
+            <!-- Timeline View -->
+            <div id="timelineView" class="tab-content hidden">
+                <h3 class="text-lg font-semibold mb-4">Event Timeline</h3>
+                <div id="timelineContainer" class="timeline-container">
+                    <p class="text-sm" style="color: var(--muted);">Run a simulation to see events...</p>
+                </div>
+            </div>
+            
+            <!-- RIBs View -->
+            <div id="ribsView" class="tab-content hidden">
+                <h3 class="text-lg font-semibold mb-4">Final Routing Tables (RIBs)</h3>
+                <div id="ribsContainer" class="rib-container">
+                    <p class="text-sm" style="color: var(--muted);">Run a simulation to see RIBs...</p>
+                </div>
+            </div>
+            
+            <!-- Charts View -->
+            <div id="chartsView" class="tab-content hidden">
+                <h3 class="text-lg font-semibold mb-6">Metrics Charts</h3>
+                <div class="space-y-6">
+                    <div class="chart-container">
+                        <canvas id="eventsChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="pathLengthChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="bestPathStabilityChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="asCentralityChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Initialize the application when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        initApp();
+    });
+</script>
+{% endblock %}
